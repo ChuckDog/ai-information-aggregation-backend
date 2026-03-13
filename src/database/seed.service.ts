@@ -24,7 +24,7 @@ export class SeedService {
       await this.usersService.create({
         email: adminEmail,
         name: 'Admin User',
-        passwordHash: 'admin123', // Will be hashed by service
+        password: 'admin123', // Will be hashed by service
       });
       this.logger.log(`Created admin user: ${adminEmail}`);
     } else {
@@ -38,7 +38,7 @@ export class SeedService {
       await this.usersService.create({
         email: demoEmail,
         name: 'Demo User',
-        passwordHash: 'demo123', // Will be hashed by service
+        password: 'demo123', // Will be hashed by service
       });
       this.logger.log(`Created demo user: ${demoEmail}`);
     } else {

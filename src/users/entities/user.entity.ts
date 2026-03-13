@@ -16,13 +16,13 @@ export class User {
   @Column({ unique: true })
   email: string;
 
-  @Column({ name: 'password_hash' })
-  passwordHash: string;
+  @Column({ name: 'password', nullable: true })
+  password: string;
 
   @Column({ name: 'refresh_token_hash', nullable: true })
   refreshTokenHash: string;
 
-  @Column()
+  @Column({ nullable: true })
   name: string;
 
   @CreateDateColumn({ name: 'created_at' })

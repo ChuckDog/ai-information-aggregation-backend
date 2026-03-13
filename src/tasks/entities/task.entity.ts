@@ -38,7 +38,13 @@ export class Task {
   config: Record<string, any>;
 
   @Column({ default: 'pending' })
-  status: string; // 'pending' | 'running' | 'completed' | 'failed'
+  status: string; // 'pending' | 'running' | 'completed' | 'failed' | 'paused'
+
+  @Column('int', { default: 0 })
+  progress: number; // 0-100
+
+  @Column('text', { nullable: true })
+  current_step: string; // e.g., "Analyzing URLs", "Crawling page 1", "Processing data"
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt: Date;

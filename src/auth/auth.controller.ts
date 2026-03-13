@@ -32,7 +32,7 @@ export class AuthController {
     return this.usersService.create({
       email: createUserDto.email,
       name: createUserDto.name,
-      passwordHash: createUserDto.password, // Will be hashed in service
+      password: createUserDto.password, // Will be hashed in service
     });
   }
 

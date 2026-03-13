@@ -13,7 +13,7 @@ export class CrawlStrategy {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'task_id' })
+  @Column({ name: 'task_id', nullable: true }) // Allow nullable temporarily to fix the issue or verify if it helps
   taskId: string;
 
   @ManyToOne(() => Task, (task) => task.strategies, { onDelete: 'CASCADE' })

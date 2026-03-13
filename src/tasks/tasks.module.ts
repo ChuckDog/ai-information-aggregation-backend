@@ -6,11 +6,13 @@ import { Task } from './entities/task.entity';
 import { TaskResult } from './entities/task-result.entity';
 import { CrawlStrategy } from './entities/crawl-strategy.entity';
 import { AIModule } from '../ai/ai.module';
+import { CrawlerModule } from '../crawler/crawler.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Task, TaskResult, CrawlStrategy]),
     AIModule,
+    CrawlerModule,
   ],
   controllers: [TasksController],
   providers: [TasksService],

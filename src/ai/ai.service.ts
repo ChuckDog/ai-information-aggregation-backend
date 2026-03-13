@@ -1,26 +1,26 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import OpenAI from 'openai';
+import axios from 'axios';
 
 @Injectable()
 export class AIService {
-  private openai: OpenAI;
   private readonly logger = new Logger(AIService.name);
+  private readonly apiUrl =
+    'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 
-  constructor(private configService: ConfigService) {
-    this.openai = new OpenAI({
-      apiKey: this.configService.get<string>('QWEN_API_KEY'),
-      baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', // Qwen compatible endpoint
-    });
-  }
+  constructor(private configService: ConfigService) {}
 
   async generateStrategy(
     instructions: string,
     urls: string[] = [],
   ): Promise<any> {
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: 'qwen-plus', // Use qwen-plus or qwen-max
+      this.logger.log('Sending request to Qwen API (via axios)...');
+
+      const apiKey = this.configService.get<string>('QWEN_API_KEY');
+
+      const payload = {
+        model: 'qwen-plus',
         messages: [
           {
             role: 'system',
@@ -36,6 +36,13 @@ export class AIService {
                   "selector_hint": "suggested CSS selector or semantic tag (e.g., h1, .price, article)" 
                 }
               ],
+              "list_crawling": {
+                  "enabled": false, // Set to true if user wants to crawl a list of items and then their details
+                  "list_selector": "CSS selector for the list items (e.g., 'ul.news-list > li')",
+                  "link_selector": "CSS selector for the link inside the list item (e.g., 'a.title-link')",
+                  "keyword_filter_selector": "CSS selector for the element containing text to filter by (e.g., '.title-text')",
+                  "next_page_selector": "Optional selector for next page button"
+              },
               "keywords_filter": ["keyword1", "keyword2"],
               "max_depth": 1, 
               "interaction_type": "static" | "scroll" | "click_pagination"
@@ -50,19 +57,51 @@ export class AIService {
           },
         ],
         temperature: 0.2,
+      };
+
+      const response = await axios.post(this.apiUrl, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        timeout: 30000, // 30 seconds timeout
       });
 
-      const content = completion.choices[0].message.content;
-      // Clean up potential markdown code blocks if the model ignores the instruction
+      this.logger.log('Qwen API response received.');
+      const content = response.data.choices[0].message.content;
+
+      // Clean up potential markdown code blocks
       const jsonString = content
         .replace(/^```json\s*/, '')
         .replace(/\s*```$/, '');
 
       return JSON.parse(jsonString);
     } catch (error) {
-      this.logger.error('Failed to generate strategy with Qwen', error);
-      // Fallback or rethrow
-      throw new Error('Failed to generate crawling strategy: ' + error.message);
+      this.logger.error(
+        'Failed to generate strategy with Qwen: ' +
+          (error.response?.data?.error?.message || error.message),
+      );
+
+      // Fallback strategy
+      this.logger.warn('Using fallback strategy due to AI error.');
+      return {
+        summary: 'Fallback extraction (AI unavailable)',
+        extraction_rules: [
+          {
+            field_name: 'title',
+            description: 'Page Title',
+            selector_hint: 'title',
+          },
+          {
+            field_name: 'content',
+            description: 'Main Content',
+            selector_hint: 'body',
+          },
+        ],
+        keywords_filter: [],
+        max_depth: 1,
+        interaction_type: 'static',
+      };
     }
   }
 }

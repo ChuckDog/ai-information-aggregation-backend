@@ -17,11 +17,11 @@ export class UsersService {
 
   async create(user: Partial<User>): Promise<User> {
     const salt = await bcrypt.genSalt();
-    const passwordHash = await bcrypt.hash(user.passwordHash, salt);
+    const password = await bcrypt.hash(user.password, salt);
 
     const newUser = this.usersRepository.create({
       ...user,
-      passwordHash,
+      password,
     });
     return this.usersRepository.save(newUser);
   }
