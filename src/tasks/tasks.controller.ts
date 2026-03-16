@@ -11,6 +11,7 @@ import {
   Header,
   Query,
   Res,
+  ForbiddenException,
 } from '@nestjs/common';
 import { Response } from 'express';
 import { TasksService } from './tasks.service';
@@ -25,17 +26,32 @@ export class TasksController {
 
   @Post()
   create(@Body() createTaskDto: CreateTaskDto, @Request() req) {
+    if (!req.user.isActive) {
+      throw new ForbiddenException('User is inactive');
+    }
     return this.tasksService.create(createTaskDto, req.user);
   }
 
   @Get()
-  findAll(@Request() req) {
-    return this.tasksService.findAll(req.user);
+  findAll(@Request() req, @Query('userId') userId?: string) {
+    const userPayload =
+      userId && req.user.role === 'admin'
+        ? { ...req.user, sub: userId, id: userId }
+        : req.user;
+    return this.tasksService.findAll(userPayload);
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string, @Request() req) {
-    return this.tasksService.findOne(id, req.user);
+  findOne(
+    @Param('id') id: string,
+    @Request() req,
+    @Query('userId') userId?: string,
+  ) {
+    const userPayload =
+      userId && req.user.role === 'admin'
+        ? { ...req.user, sub: userId, id: userId }
+        : req.user;
+    return this.tasksService.findOne(id, userPayload);
   }
 
   @Patch(':id')
@@ -54,16 +70,25 @@ export class TasksController {
 
   @Post(':id/execute')
   execute(@Param('id') id: string, @Request() req) {
+    if (!req.user.isActive) {
+      throw new ForbiddenException('User is inactive');
+    }
     return this.tasksService.execute(id, req.user);
   }
 
   @Post(':id/pause')
   pause(@Param('id') id: string, @Request() req) {
+    if (!req.user.isActive) {
+      throw new ForbiddenException('User is inactive');
+    }
     return this.tasksService.pause(id, req.user);
   }
 
   @Post(':id/stop')
   stop(@Param('id') id: string, @Request() req) {
+    if (!req.user.isActive) {
+      throw new ForbiddenException('User is inactive');
+    }
     return this.tasksService.stop(id, req.user);
   }
 
@@ -73,6 +98,9 @@ export class TasksController {
     @Body() body: { structuringInstructions?: string },
     @Request() req,
   ) {
+    if (!req.user.isActive) {
+      throw new ForbiddenException('User is inactive');
+    }
     return this.tasksService.structureResults(
       id,
       req.user,
@@ -82,12 +110,23 @@ export class TasksController {
 
   @Post(':id/restart')
   restart(@Param('id') id: string, @Request() req) {
+    if (!req.user.isActive) {
+      throw new ForbiddenException('User is inactive');
+    }
     return this.tasksService.restart(id, req.user);
   }
 
   @Get(':id/results')
-  getResults(@Param('id') id: string, @Request() req) {
-    return this.tasksService.getResults(id, req.user);
+  getResults(
+    @Param('id') id: string,
+    @Request() req,
+    @Query('userId') userId?: string,
+  ) {
+    const userPayload =
+      userId && req.user.role === 'admin'
+        ? { ...req.user, sub: userId, id: userId }
+        : req.user;
+    return this.tasksService.getResults(id, userPayload);
   }
 
   @Get(':id/export')
@@ -96,9 +135,14 @@ export class TasksController {
     @Query('format') format = 'md',
     @Request() req,
     @Res() res: Response,
+    @Query('userId') userId?: string,
   ) {
+    const userPayload =
+      userId && req.user.role === 'admin'
+        ? { ...req.user, sub: userId, id: userId }
+        : req.user;
     const { buffer, filename, contentType } =
-      await this.tasksService.exportResults(id, format, req.user);
+      await this.tasksService.exportResults(id, format, userPayload);
 
     res.set({
       'Content-Type': contentType,

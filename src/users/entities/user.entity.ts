@@ -33,4 +33,13 @@ export class User {
 
   @OneToMany(() => Task, (task) => task.user)
   tasks: Task[];
+
+  @Column({ default: 'user' })
+  role: 'admin' | 'user';
+
+  @Column({ default: true })
+  isActive: boolean;
+
+  @Column({ name: 'last_login_at', nullable: true })
+  lastLoginAt: Date;
 }

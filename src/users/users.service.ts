@@ -15,6 +15,14 @@ export class UsersService {
     return this.usersRepository.findOne({ where: { email } });
   }
 
+  async findAll(page = 1, limit = 20): Promise<[User[], number]> {
+    return this.usersRepository.findAndCount({
+      skip: (page - 1) * limit,
+      take: limit,
+      order: { createdAt: 'DESC' },
+    });
+  }
+
   async create(user: Partial<User>): Promise<User> {
     const salt = await bcrypt.genSalt();
     const password = await bcrypt.hash(user.password, salt);
