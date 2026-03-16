@@ -24,6 +24,10 @@ export class CreateTaskDto {
   @IsNotEmpty()
   instructions: string;
 
+  @IsString()
+  @IsOptional()
+  structuringInstructions?: string;
+
   @IsObject()
   @IsOptional()
   config?: Record<string, any>;

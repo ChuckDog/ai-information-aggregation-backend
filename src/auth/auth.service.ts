@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
@@ -12,6 +13,7 @@ export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
+    private configService: ConfigService,
   ) {}
 
   async signIn(email: string, pass: string): Promise<any> {
@@ -37,7 +39,7 @@ export class AuthService {
   async refreshTokens(refreshToken: string) {
     try {
       const payload = await this.jwtService.verifyAsync(refreshToken, {
-        secret: 'DO_NOT_USE_THIS_VALUE_IN_PRODUCTION', // TODO: Move to ConfigService
+        secret: this.configService.get<string>('JWT_SECRET'),
       });
       const userId = payload.sub;
       const user = await this.usersService.findById(userId);
@@ -74,11 +76,11 @@ export class AuthService {
     const [at, rt] = await Promise.all([
       this.jwtService.signAsync(payload, {
         expiresIn: '15m',
-        secret: 'DO_NOT_USE_THIS_VALUE_IN_PRODUCTION',
+        secret: this.configService.get<string>('JWT_SECRET'),
       }),
       this.jwtService.signAsync(payload, {
         expiresIn: '7d',
-        secret: 'DO_NOT_USE_THIS_VALUE_IN_PRODUCTION',
+        secret: this.configService.get<string>('JWT_SECRET'),
       }),
     ]);
 

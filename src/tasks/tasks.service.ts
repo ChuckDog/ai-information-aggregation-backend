@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Task } from './entities/task.entity';
@@ -111,23 +115,45 @@ export class TasksService {
       order: { createdAt: 'DESC' },
     });
 
-    // Flatten results for Excel/CSV if possible
-    // Extract all unique keys from data
+    // Determine export type: 'structured' if format has prefix or we default to it?
+    // Let's assume the standard export exports what's available.
+    // If we have structuredData, we should probably prioritize it or merge it.
+    // User asked for "export table data" which implies the structured view.
+    // Let's modify logic to: if structuredData exists for a result, use it.
+    // Otherwise fallback to data.
+
     const flattenedData = [];
     results.forEach((r) => {
-      const data = r.data || {};
-      if (data.type === 'list_crawl' && Array.isArray(data.items)) {
-        data.items.forEach((item) => {
+      // Prioritize structuredData if available
+      const sourceData = r.structuredData || r.data || {};
+
+      // Handle array results (e.g. from structured list or crawled list)
+      if (Array.isArray(sourceData)) {
+        sourceData.forEach((item) => {
           flattenedData.push({
             ...item,
-            _source_url: data.url,
+            _source_url: r.data?.url || (r.data as any)?.url,
             _crawled_at: r.createdAt,
+            _is_structured: !!r.structuredData,
+          });
+        });
+      } else if (sourceData.items && Array.isArray(sourceData.items)) {
+        // Handle { items: [...] } structure
+        sourceData.items.forEach((item) => {
+          flattenedData.push({
+            ...item,
+            _source_url: r.data?.url || (r.data as any)?.url,
+            _crawled_at: r.createdAt,
+            _is_structured: !!r.structuredData,
           });
         });
       } else {
+        // Single object
         flattenedData.push({
-          ...data,
+          ...sourceData,
+          _source_url: r.data?.url || (r.data as any)?.url,
           _crawled_at: r.createdAt,
+          _is_structured: !!r.structuredData,
         });
       }
     });
@@ -378,6 +404,169 @@ export class TasksService {
     }
   }
 
+  async structureResults(
+    id: string,
+    userPayload: any,
+    structuringInstructions?: string,
+  ): Promise<void> {
+    const task = await this.findOne(id, userPayload);
+
+    // If new instructions are provided, update the task
+    if (structuringInstructions) {
+      task.structuringInstructions = structuringInstructions;
+      // Clear old schema if instructions changed
+      task.structuringSchema = null;
+      await this.tasksRepository.save(task);
+    }
+
+    if (!task.structuringInstructions) {
+      throw new BadRequestException('No structuring instructions provided');
+    }
+
+    // Update status to indicate processing
+    await this.tasksRepository.update(task.id, {
+      status: 'running',
+      current_step: 'Starting data structuring...',
+    });
+
+    // Run in background
+    // We don't await this so the controller returns immediately
+    this.processDataStructuring(task, true).catch(async (err) => {
+      // If the task was deleted or not found, we can't update it
+      try {
+        await this.tasksRepository.update(task.id, {
+          status: 'failed',
+          current_step: `Structuring failed: ${err.message}`,
+        });
+      } catch (updateErr) {
+        console.error('Failed to update task status on error:', updateErr);
+      }
+    });
+  }
+
+  private async processDataStructuring(task: Task, isStandalone = false) {
+    const freshTask = await this.tasksRepository.findOne({
+      where: { id: task.id },
+    });
+    if (!freshTask || (await this.shouldStop(freshTask.id))) return;
+
+    try {
+      // 1. Generate Schema
+      await this.tasksRepository.update(freshTask.id, {
+        current_step: 'Generating data structure schema...',
+      });
+
+      let schema = freshTask.structuringSchema;
+      if (!schema) {
+        // Only generate schema if instructions exist
+        if (!freshTask.structuringInstructions) {
+          throw new Error(
+            'No structuring instructions found for schema generation.',
+          );
+        }
+
+        try {
+          schema = await this.aiService.generateStructuringSchema(
+            freshTask.structuringInstructions,
+          );
+          await this.tasksRepository.update(freshTask.id, {
+            structuringSchema: schema,
+          });
+        } catch (schemaError) {
+          console.error('Schema generation failed:', schemaError);
+          throw new Error(`Schema generation failed: ${schemaError.message}`);
+        }
+      }
+
+      // 2. Fetch Results to process
+      const results = await this.taskResultsRepository.find({
+        where: { taskId: freshTask.id },
+      });
+      const total = results.length;
+
+      await this.tasksRepository.update(freshTask.id, {
+        current_step: `Structuring data for ${total} results...`,
+      });
+
+      // 3. Process each result
+      for (let i = 0; i < total; i++) {
+        if (await this.shouldStop(freshTask.id)) return;
+
+        const result = results[i];
+        let structuredData: any;
+
+        // Check if it's a list crawl with items
+        if (
+          result.data?.type === 'list_crawl' &&
+          Array.isArray(result.data?.items)
+        ) {
+          const items = result.data.items;
+          const structuredItems = [];
+
+          // Process each item's content
+          for (let j = 0; j < items.length; j++) {
+            if (await this.shouldStop(freshTask.id)) return;
+            const item = items[j];
+            // User requested to structure the 'content' field specifically
+            // Fallback to item itself if content is missing
+            const sourceData = item.content || item;
+
+            // Update status for detailed progress
+            await this.tasksRepository.update(freshTask.id, {
+              current_step: `Structuring result ${i + 1}/${total} (Item ${
+                j + 1
+              }/${items.length})`,
+            });
+
+            try {
+              const structuredItem = await this.aiService.structureData(
+                sourceData,
+                schema,
+              );
+              structuredItems.push(structuredItem);
+            } catch (e) {
+              console.error(
+                `Failed to structure item ${j} of result ${result.id}`,
+                e,
+              );
+              structuredItems.push({
+                error: 'Structuring failed',
+                raw: sourceData,
+              });
+            }
+          }
+          structuredData = structuredItems;
+        } else {
+          // Single page or generic crawl
+          const sourceData = result.data?.content || result.data;
+          structuredData = await this.aiService.structureData(
+            sourceData,
+            schema,
+          );
+        }
+
+        // Update result
+        await this.taskResultsRepository.update(result.id, {
+          structuredData: structuredData,
+        });
+
+        await this.tasksRepository.update(freshTask.id, {
+          current_step: `Structuring result ${i + 1}/${total} completed`,
+        });
+      }
+
+      if (isStandalone) {
+        await this.tasksRepository.update(freshTask.id, {
+          status: 'completed',
+          current_step: 'Structuring completed successfully.',
+        });
+      }
+    } catch (error) {
+      console.error('Error in structuring:', error);
+      throw error;
+    }
+  }
+
   private async runTaskBackground(task: Task) {
     // Re-fetch task to ensure we have a fresh entity tracked by TypeORM
     // This is crucial for long-running async processes where the original 'task' object might become detached
@@ -495,6 +684,12 @@ export class TasksService {
           result.task = undefined as any;
           await this.taskResultsRepository.save(result);
         }
+      }
+
+      // 4. Data Structuring (Optional)
+      if (freshTask.structuringInstructions) {
+        if (await this.shouldStop(freshTask.id)) return;
+        await this.processDataStructuring(freshTask, false);
       }
 
       // Final check before marking as completed

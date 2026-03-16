@@ -67,6 +67,19 @@ export class TasksController {
     return this.tasksService.stop(id, req.user);
   }
 
+  @Post(':id/structure')
+  structure(
+    @Param('id') id: string,
+    @Body() body: { structuringInstructions?: string },
+    @Request() req,
+  ) {
+    return this.tasksService.structureResults(
+      id,
+      req.user,
+      body.structuringInstructions,
+    );
+  }
+
   @Post(':id/restart')
   restart(@Param('id') id: string, @Request() req) {
     return this.tasksService.restart(id, req.user);

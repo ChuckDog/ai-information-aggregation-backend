@@ -104,4 +104,117 @@ export class AIService {
       };
     }
   }
+
+  async generateStructuringSchema(instructions: string): Promise<any> {
+    try {
+      this.logger.log('Generating structuring schema via Qwen...');
+      const apiKey = this.configService.get<string>('QWEN_API_KEY');
+
+      const payload = {
+        model: 'qwen-plus',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a data architect. Analyze the user's natural language request for data formatting and generate a JSON Schema (Draft-07) that describes the desired output structure.
+            
+            Return ONLY the raw JSON Schema object. Do not include markdown formatting.
+            The root type should usually be 'object' or 'array' depending on the user's request.
+            Example user request: "I want a list of articles with title and date"
+            Example output:
+            {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "title": { "type": "string" },
+                  "date": { "type": "string" }
+                },
+                "required": ["title", "date"]
+              }
+            }`,
+          },
+          {
+            role: 'user',
+            content: `User Instructions: "${instructions}"`,
+          },
+        ],
+        temperature: 0.1,
+      };
+
+      const response = await axios.post(this.apiUrl, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        timeout: 30000,
+      });
+
+      const content = response.data.choices[0].message.content;
+      const jsonString = content
+        .replace(/^```json\s*/, '')
+        .replace(/\s*```$/, '');
+      return JSON.parse(jsonString);
+    } catch (error) {
+      this.logger.error(
+        'Failed to generate schema: ' +
+          (error.response?.data?.error?.message || error.message),
+      );
+      throw error;
+    }
+  }
+
+  async structureData(data: any, schema: any): Promise<any> {
+    try {
+      this.logger.log('Structuring data via Qwen...');
+      const apiKey = this.configService.get<string>('QWEN_API_KEY');
+
+      // Optimization: If data is too large, we might need to truncate or summarize.
+      // For now, we assume data fits in context window (Qwen-plus has 32k or more).
+      const dataStr = JSON.stringify(data).substring(0, 50000); // Simple safety truncation
+
+      const payload = {
+        model: 'qwen-plus',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a data transformation engine. 
+            Input: Raw JSON data and a target JSON Schema.
+            Output: The Raw Data transformed to strictly adhere to the Target JSON Schema.
+            
+            Rules:
+            1. Extract relevant information from Raw Data to populate the fields defined in the Schema.
+            2. If a field cannot be found, use null or an empty string/array as appropriate.
+            3. Return ONLY the valid JSON result. No markdown.`,
+          },
+          {
+            role: 'user',
+            content: `Target Schema: ${JSON.stringify(
+              schema,
+            )}\n\nRaw Data: ${dataStr}`,
+          },
+        ],
+        temperature: 0.1,
+      };
+
+      const response = await axios.post(this.apiUrl, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        timeout: 60000, // Longer timeout for processing
+      });
+
+      const content = response.data.choices[0].message.content;
+      const jsonString = content
+        .replace(/^```json\s*/, '')
+        .replace(/\s*```$/, '');
+      return JSON.parse(jsonString);
+    } catch (error) {
+      this.logger.error(
+        'Failed to structure data: ' +
+          (error.response?.data?.error?.message || error.message),
+      );
+      return { error: 'Failed to structure data', raw: data };
+    }
+  }
 }

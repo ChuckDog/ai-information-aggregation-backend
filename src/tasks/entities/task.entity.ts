@@ -34,6 +34,12 @@ export class Task {
   @Column('text')
   instructions: string;
 
+  @Column('text', { nullable: true })
+  structuringInstructions: string; // User provided instructions for data structuring
+
+  @Column('jsonb', { nullable: true })
+  structuringSchema: any; // AI generated JSON schema
+
   @Column('jsonb', { default: {} })
   config: Record<string, any>;
 

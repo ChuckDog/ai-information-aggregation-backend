@@ -23,6 +23,9 @@ export class TaskResult {
   @Column('jsonb')
   data: any;
 
+  @Column('jsonb', { nullable: true })
+  structuredData: any; // AI processed structured data based on structuringInstructions
+
   @Column()
   status: string;
 
