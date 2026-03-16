@@ -369,6 +369,15 @@ export class TasksService {
     }
   }
 
+  async stop(id: string, userPayload: any): Promise<void> {
+    const task = await this.findOne(id, userPayload);
+    if (task.status === 'running' || task.status === 'paused') {
+      task.status = 'failed';
+      task.current_step = 'Task stopped by user';
+      await this.tasksRepository.save(task);
+    }
+  }
+
   private async runTaskBackground(task: Task) {
     // Re-fetch task to ensure we have a fresh entity tracked by TypeORM
     // This is crucial for long-running async processes where the original 'task' object might become detached
@@ -381,16 +390,18 @@ export class TasksService {
       // Check for pause
       if (await this.shouldStop(freshTask.id)) return;
 
-      freshTask.status = 'running';
-      freshTask.progress = 10;
-      freshTask.current_step = 'Initializing AI strategy...';
-      await this.tasksRepository.save(freshTask);
+      // Use update instead of save to avoid overwriting status if it changed concurrently
+      await this.tasksRepository.update(freshTask.id, {
+        progress: 10,
+        current_step: 'Initializing AI strategy...',
+      });
 
       // 1. Generate Strategy with AI
-      freshTask.progress = 20;
-      freshTask.current_step =
-        'Analyzing requirements and generating crawl strategy (this may take a few seconds)...';
-      await this.tasksRepository.save(freshTask);
+      await this.tasksRepository.update(freshTask.id, {
+        progress: 20,
+        current_step:
+          'Analyzing requirements and generating crawl strategy (this may take a few seconds)...',
+      });
 
       const strategyConfig = await this.aiService.generateStrategy(
         freshTask.instructions,
@@ -400,11 +411,17 @@ export class TasksService {
       // Save AI insights to task for immediate feedback
       if (strategyConfig.keywords_filter) {
         freshTask.keywords = strategyConfig.keywords_filter.join(', ');
+        // We can save keywords using update too
+        await this.tasksRepository.update(freshTask.id, {
+          keywords: freshTask.keywords,
+        });
       }
+
       // Update progress
-      freshTask.progress = 30;
-      freshTask.current_step = 'Strategy generated. Saving configuration...';
-      await this.tasksRepository.save(freshTask);
+      await this.tasksRepository.update(freshTask.id, {
+        progress: 30,
+        current_step: 'Strategy generated. Saving configuration...',
+      });
 
       // 2. Save Strategy
       // Create new instance without relation object first to avoid circular/detached issues
@@ -423,9 +440,10 @@ export class TasksService {
 
       if (await this.shouldStop(freshTask.id)) return;
 
-      freshTask.progress = 40;
-      freshTask.current_step = 'Starting crawling process...';
-      await this.tasksRepository.save(freshTask);
+      await this.tasksRepository.update(freshTask.id, {
+        progress: 40,
+        current_step: 'Starting crawling process...',
+      });
 
       // 3. Execute Crawler for each URL
       for (let i = 0; i < freshTask.urls.length; i++) {
@@ -434,9 +452,11 @@ export class TasksService {
         const url = freshTask.urls[i];
         // Calculate progress more smoothly: 40% -> 90%
         const urlProgress = Math.floor(40 + (i / freshTask.urls.length) * 50);
-        freshTask.progress = urlProgress;
-        freshTask.current_step = `Crawling: ${url}`;
-        await this.tasksRepository.save(freshTask);
+
+        await this.tasksRepository.update(freshTask.id, {
+          progress: urlProgress,
+          current_step: `Crawling: ${url}`,
+        });
 
         try {
           // Perform actual crawling using the generated strategy
@@ -460,8 +480,9 @@ export class TasksService {
           const postUrlProgress = Math.floor(
             40 + ((i + 1) / freshTask.urls.length) * 50,
           );
-          freshTask.progress = postUrlProgress;
-          await this.tasksRepository.save(freshTask);
+          await this.tasksRepository.update(freshTask.id, {
+            progress: postUrlProgress,
+          });
         } catch (crawlError) {
           // Log error but continue with other URLs
           const result = this.taskResultsRepository.create({
@@ -476,15 +497,31 @@ export class TasksService {
         }
       }
 
-      freshTask.status = 'completed';
-      freshTask.progress = 100;
-      freshTask.current_step = 'Task completed successfully.';
-      await this.tasksRepository.save(freshTask);
+      // Final check before marking as completed
+      if (await this.shouldStop(freshTask.id)) return;
+
+      await this.tasksRepository.update(freshTask.id, {
+        status: 'completed',
+        progress: 100,
+        current_step: 'Task completed successfully.',
+      });
     } catch (error) {
-      freshTask.status = 'failed';
-      freshTask.progress = 100;
-      freshTask.current_step = `Error: ${error.message}`;
-      await this.tasksRepository.save(freshTask);
+      // If stopped, we might end up here if error is thrown, but status might be failed already
+      // Check if it was stopped by user to avoid overwriting "stopped" message if possible
+      // But typically we want to show the error if it wasn't a stop action
+
+      const currentStatus = (
+        await this.tasksRepository.findOne({ where: { id: freshTask.id } })
+      )?.status;
+      if (currentStatus === 'failed' && error.message === 'Task stopped') {
+        return;
+      }
+
+      await this.tasksRepository.update(freshTask.id, {
+        status: 'failed',
+        progress: 100,
+        current_step: `Error: ${error.message}`,
+      });
 
       const result = this.taskResultsRepository.create({
         taskId: freshTask.id,

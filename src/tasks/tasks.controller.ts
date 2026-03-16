@@ -62,6 +62,11 @@ export class TasksController {
     return this.tasksService.pause(id, req.user);
   }
 
+  @Post(':id/stop')
+  stop(@Param('id') id: string, @Request() req) {
+    return this.tasksService.stop(id, req.user);
+  }
+
   @Post(':id/restart')
   restart(@Param('id') id: string, @Request() req) {
     return this.tasksService.restart(id, req.user);
