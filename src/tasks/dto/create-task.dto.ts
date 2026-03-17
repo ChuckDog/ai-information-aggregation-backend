@@ -31,4 +31,15 @@ export class CreateTaskDto {
   @IsObject()
   @IsOptional()
   config?: Record<string, any>;
+
+  @IsString()
+  @IsOptional()
+  cronExpression?: string;
+
+  @IsString()
+  @IsOptional()
+  scheduleDescription?: string;
+
+  @IsOptional()
+  isScheduled?: boolean;
 }

@@ -12,6 +12,7 @@ import { TaskResult } from './entities/task-result.entity';
 import { CrawlStrategy } from './entities/crawl-strategy.entity';
 import { AIService } from '../ai/ai.service';
 import { CrawlerService } from '../crawler/crawler.service';
+import { TaskSchedulingService } from './task-scheduling.service';
 import * as ExcelJS from 'exceljs';
 import PDFDocument = require('pdfkit');
 import * as fs from 'fs';
@@ -19,6 +20,8 @@ import * as path from 'path';
 
 @Injectable()
 export class TasksService {
+  private taskSchedulingService: TaskSchedulingService;
+
   constructor(
     @InjectRepository(Task)
     private tasksRepository: Repository<Task>,
@@ -30,15 +33,59 @@ export class TasksService {
     private crawlerService: CrawlerService,
   ) {}
 
+  // Use setter injection to avoid circular dependency
+  setSchedulingService(service: TaskSchedulingService) {
+    this.taskSchedulingService = service;
+  }
+
   async create(createTaskDto: CreateTaskDto, userPayload: any): Promise<Task> {
     const userId = userPayload.sub || userPayload.id;
+
+    // Generate cron expression from description if needed
+    if (
+      createTaskDto.isScheduled &&
+      !createTaskDto.cronExpression &&
+      createTaskDto.scheduleDescription
+    ) {
+      try {
+        const generatedCron = await this.aiService.generateCronExpression(
+          createTaskDto.scheduleDescription,
+        );
+        if (generatedCron) {
+          createTaskDto.cronExpression = generatedCron;
+        } else {
+          // If AI fails or returns empty, we might want to warn or just proceed without scheduling?
+          // For now, let's unset isScheduled if we can't get a cron
+          createTaskDto.isScheduled = false;
+        }
+      } catch (e) {
+        console.error('Failed to generate cron expression:', e);
+        createTaskDto.isScheduled = false;
+      }
+    }
+
     const task = this.tasksRepository.create({
       ...createTaskDto,
       userId: userId,
       status: 'pending',
       progress: 0,
     });
-    return this.tasksRepository.save(task);
+
+    const savedTask = await this.tasksRepository.save(task);
+
+    // If task is created with scheduling
+    if (
+      savedTask.isScheduled &&
+      savedTask.cronExpression &&
+      this.taskSchedulingService
+    ) {
+      this.taskSchedulingService.addCronJob(
+        savedTask.id,
+        savedTask.cronExpression,
+      );
+    }
+
+    return savedTask;
   }
 
   async findAll(userPayload: any): Promise<Task[]> {
@@ -87,11 +134,29 @@ export class TasksService {
     }
 
     Object.assign(task, updateTaskDto);
-    return this.tasksRepository.save(task);
+    const updatedTask = await this.tasksRepository.save(task);
+
+    if (this.taskSchedulingService) {
+      if (updatedTask.isScheduled && updatedTask.cronExpression) {
+        this.taskSchedulingService.addCronJob(
+          updatedTask.id,
+          updatedTask.cronExpression,
+        );
+      } else {
+        this.taskSchedulingService.removeCronJob(updatedTask.id);
+      }
+    }
+
+    return updatedTask;
   }
 
   async remove(id: string, userPayload: any): Promise<void> {
     const task = await this.findOne(id, userPayload);
+
+    if (this.taskSchedulingService) {
+      this.taskSchedulingService.removeCronJob(task.id);
+    }
+
     await this.tasksRepository.remove(task);
   }
 

@@ -7,6 +7,7 @@ import { TaskResult } from './entities/task-result.entity';
 import { CrawlStrategy } from './entities/crawl-strategy.entity';
 import { AIModule } from '../ai/ai.module';
 import { CrawlerModule } from '../crawler/crawler.module';
+import { TaskSchedulingService } from './task-scheduling.service';
 
 @Module({
   imports: [
@@ -15,7 +16,7 @@ import { CrawlerModule } from '../crawler/crawler.module';
     CrawlerModule,
   ],
   controllers: [TasksController],
-  providers: [TasksService],
+  providers: [TasksService, TaskSchedulingService],
   exports: [TasksService],
 })
 export class TasksModule {}

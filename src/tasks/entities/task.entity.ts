@@ -46,6 +46,12 @@ export class Task {
   @Column({ default: 'pending' })
   status: string; // 'pending' | 'running' | 'completed' | 'failed' | 'paused'
 
+  @Column({ name: 'cron_expression', nullable: true })
+  cronExpression: string; // e.g., '0 * * * *' for hourly
+
+  @Column({ name: 'is_scheduled', default: false })
+  isScheduled: boolean;
+
   @Column('int', { default: 0 })
   progress: number; // 0-100
 

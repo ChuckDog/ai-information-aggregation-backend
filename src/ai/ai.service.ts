@@ -163,6 +163,56 @@ export class AIService {
     }
   }
 
+  async generateCronExpression(description: string): Promise<string> {
+    try {
+      this.logger.log('Generating cron expression via Qwen...');
+      const apiKey = this.configService.get<string>('QWEN_API_KEY');
+
+      const payload = {
+        model: 'qwen-plus',
+        messages: [
+          {
+            role: 'system',
+            content: `You are an expert in cron expressions. Convert the user's natural language schedule description into a valid standard cron expression (5 or 6 fields).
+            
+            Rules:
+            1. Return ONLY the cron expression string. No markdown, no explanations, no JSON.
+            2. If the description is invalid or cannot be converted, return an empty string.
+            3. Standard cron format: "minute hour day-of-month month day-of-week" (optional seconds at start)
+            
+            Examples:
+            User: "every hour" -> Output: "0 * * * *"
+            User: "every day at 8 am" -> Output: "0 8 * * *"
+            User: "every Monday at 9:30" -> Output: "30 9 * * 1"`,
+          },
+          {
+            role: 'user',
+            content: `Description: "${description}"`,
+          },
+        ],
+        temperature: 0.1,
+      };
+
+      const response = await axios.post(this.apiUrl, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        timeout: 10000,
+      });
+
+      const content = response.data.choices[0].message.content.trim();
+      // Remove any potential quotes or markdown
+      return content.replace(/^["'`]|["'`]$/g, '');
+    } catch (error) {
+      this.logger.error(
+        'Failed to generate cron expression: ' +
+          (error.response?.data?.error?.message || error.message),
+      );
+      return '';
+    }
+  }
+
   async structureData(data: any, schema: any): Promise<any> {
     try {
       this.logger.log('Structuring data via Qwen...');
